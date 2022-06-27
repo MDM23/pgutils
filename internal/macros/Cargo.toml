@@ -1,0 +1,16 @@
+[package]
+name = "pgutils-macros"
+version = "0.0.0"
+authors = ["Peter Frank <mdm23@gmx.de>"]
+edition = "2021"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = "1.0"
+
+[dependencies.pgutils-migrate]
+path = "../migrate"

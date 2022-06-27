@@ -1,0 +1,9 @@
+[package]
+name = "pgutils"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio-postgres = "0.7"
+pgutils-migrate = { path = "internal/migrate" }
+pgutils-macros = { path = "internal/macros" }
