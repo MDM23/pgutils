@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::fmt::{Display, Write};
 use std::ops::Deref;
 
 use tokio_postgres::types::ToSql;
@@ -7,8 +7,9 @@ use tokio_postgres::{Client, RowStream};
 #[derive(Default)]
 pub struct Query {
     args: Vec<Box<dyn ToSql>>,
-    args_count: u16,
+    arg_indexes: Vec<usize>,
     buffer: String,
+    cursor: usize,
     separated: bool,
 }
 
@@ -33,7 +34,7 @@ impl Query {
         self.separated = false;
 
         if !self.buffer.is_empty() {
-            self.buffer.push(' ');
+            self.append_buffer(" ");
         }
 
         frag.push_to_query(self);
@@ -45,9 +46,9 @@ impl Query {
         F: Fragment,
     {
         if self.separated {
-            self.buffer.push_str(" AND ");
+            self.append_buffer(" AND ");
         } else if !self.buffer.is_empty() {
-            self.buffer.push(' ');
+            self.append_buffer(" ");
         }
 
         frag.push_to_query(self);
@@ -60,9 +61,9 @@ impl Query {
         F: Fragment,
     {
         if self.separated {
-            self.buffer.push(',');
+            self.append_buffer(",");
         } else if !self.buffer.is_empty() {
-            self.buffer.push(' ');
+            self.append_buffer(" ");
         }
 
         frag.push_to_query(self);
@@ -75,9 +76,9 @@ impl Query {
         F: Fragment,
     {
         if self.separated {
-            self.buffer.push_str(" OR ");
+            self.append_buffer(" OR ");
         } else if !self.buffer.is_empty() {
-            self.buffer.push(' ');
+            self.append_buffer(" ");
         }
 
         frag.push_to_query(self);
@@ -98,22 +99,41 @@ impl Query {
     }
 
     fn append_buffer(&mut self, query: &str) {
-        // TODO: Just store the index position of the parameters to enable $n
-        // style and concatenation of queries
+        self.append_buffer_with_args(query, vec![]);
+    }
+
+    fn append_buffer_with_args(&mut self, query: &str, mut args: Vec<Box<dyn ToSql>>) {
         for c in query.chars() {
             if c == '?' {
-                self.args_count += 1;
-                self.buffer.push_str(&format!("${}", self.args_count));
+                self.arg_indexes.push(self.cursor);
             } else {
                 self.buffer.push(c);
+                self.cursor += c.len_utf8();
             }
         }
+
+        self.args.append(&mut args);
     }
 }
 
 impl Display for Query {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.buffer)
+        let mut c = 1;
+
+        for a in [&[0], self.arg_indexes.as_slice(), &[self.buffer.len()]]
+            .concat()
+            .windows(2)
+        {
+            if a[0] != 0 {
+                f.write_char('$')?;
+                f.write_str(&c.to_string())?;
+                c += 1;
+            }
+
+            f.write_str(&self.buffer[a[0]..a[1]])?;
+        }
+
+        Ok(())
     }
 }
 
@@ -129,29 +149,26 @@ impl Fragment for &str {
 
 impl<T: ToSql + 'static> Fragment for (&str, T) {
     fn push_to_query(self, query: &mut Query) {
-        query.append_buffer(self.0);
-        query.args.push(Box::new(self.1));
+        query.append_buffer_with_args(self.0, vec![Box::new(self.1)]);
     }
 }
 
 impl<T: ToSql + 'static> Fragment for (&str, T, T) {
     fn push_to_query(self, query: &mut Query) {
-        query.append_buffer(self.0);
-        query.args.push(Box::new(self.1));
-        query.args.push(Box::new(self.2));
+        query.append_buffer_with_args(self.0, vec![Box::new(self.1), Box::new(self.2)]);
     }
 }
 
 impl<T: ToSql + 'static> Fragment for (&str, T, T, T) {
     fn push_to_query(self, query: &mut Query) {
-        query.append_buffer(self.0);
-        query.args.push(Box::new(self.1));
-        query.args.push(Box::new(self.2));
-        query.args.push(Box::new(self.3));
+        query.append_buffer_with_args(
+            self.0,
+            vec![Box::new(self.1), Box::new(self.2), Box::new(self.3)],
+        );
     }
 }
 
-impl<'q, F> Fragment for F
+impl<F> Fragment for F
 where
     F: FnOnce(&mut Query),
 {
@@ -160,34 +177,39 @@ where
 
         if separated {
             query.separated = false;
-            query.buffer.push('(');
+            query.append_buffer("(");
         }
 
         (self)(query);
 
         if separated {
             query.separated = true;
-            query.buffer.push(')');
+            query.append_buffer(")");
         }
     }
 }
 
-// TODO: This requires rewriting the positional parameters in the second query
-// impl Fragment for Query {
-//     fn push_to_query(self, query: &mut Query) {
-//         match query.separator {
-//             Some(_) => {
-//                 query.buffer.push('(');
-//                 query.buffer.push_str(&self.buffer);
-//                 query.buffer.push(')');
-//             }
-//             _ => query.buffer.push_str(&self.buffer),
-//         }
+impl Fragment for Query {
+    fn push_to_query(mut self, query: &mut Query) {
+        query.args.append(&mut self.args);
 
-//         query.args_count += self.args_count;
-//         query.args = query.args.drain(0..).chain(self.args.into_iter()).collect();
-//     }
-// }
+        if query.separated {
+            query.append_buffer("(");
+        }
+
+        query
+            .arg_indexes
+            .extend(self.arg_indexes.into_iter().map(|i| i + query.cursor));
+
+        query.cursor += self.cursor;
+
+        query.append_buffer(&self.buffer);
+
+        if query.separated {
+            query.append_buffer(")");
+        }
+    }
+}
 
 #[test]
 fn simple_query() {
@@ -207,5 +229,40 @@ fn simple_query() {
     assert_eq!(
         query.to_string(),
         "SELECT a,b,c FROM foobar WHERE foo = 'bar' AND bar = $1 AND ( d = $2 OR e != $3)"
+    );
+}
+
+#[test]
+fn query_concatenation() {
+    let mut query_a = Query::empty();
+
+    query_a.push(|query: &mut Query| {
+        query.or(("c = ?", 3));
+        query.or("d = 4");
+        query.or(("e = ?", 4));
+    });
+
+    let mut query_b = Query::new("SELECT * FROM test WHERE");
+    query_b.and(("a = ?", 1));
+    query_b.and(("b = ?", 2));
+    query_b.and(query_a);
+
+    assert_eq!(
+        query_b.to_string(),
+        "SELECT * FROM test WHERE a = $1 AND b = $2 AND (c = $3 OR d = 4 OR e = $4)"
+    );
+
+    let mut fields = Query::empty();
+    fields.comma("foo");
+    fields.comma("bar");
+    fields.comma(("? as foobar", 1000));
+
+    let mut query = Query::new("SELECT");
+    query.push(fields);
+    query.push("FROM my_table");
+
+    assert_eq!(
+        query.to_string(),
+        "SELECT foo,bar,$1 as foobar FROM my_table"
     );
 }
