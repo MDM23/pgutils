@@ -88,13 +88,13 @@ impl Query {
 
     pub async fn run(self, client: &Client) -> Result<RowStream, tokio_postgres::Error> {
         client
-            .query_raw(&self.buffer, self.args.iter().map(Deref::deref))
+            .query_raw(&self.to_string(), self.args.iter().map(Deref::deref))
             .await
     }
 
     pub async fn execute(self, client: &Client) -> Result<u64, tokio_postgres::Error> {
         client
-            .execute_raw(&self.buffer, self.args.iter().map(Deref::deref))
+            .execute_raw(&self.to_string(), self.args.iter().map(Deref::deref))
             .await
     }
 
