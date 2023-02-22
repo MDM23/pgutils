@@ -19,6 +19,8 @@ with-time-0_2 = ["tokio-postgres/with-time-0_2"]
 with-time-0_3 = ["tokio-postgres/with-time-0_3"]
 
 [dependencies]
-tokio-postgres = "0.7"
-pgutils-migrate = { path = "internal/migrate" }
+futures-util = { version = "0.3", default-features = false }
 pgutils-macros = { path = "internal/macros" }
+pgutils-migrate = { path = "internal/migrate" }
+qp-postgres = { version = "0.1" }
+tokio-postgres = "0.7"

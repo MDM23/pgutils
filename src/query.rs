@@ -1,8 +1,6 @@
 use std::fmt::{Display, Write};
-use std::ops::Deref;
 
 use tokio_postgres::types::ToSql;
-use tokio_postgres::{Client, RowStream};
 
 #[derive(Default)]
 pub struct Query {
@@ -86,16 +84,8 @@ impl Query {
         self
     }
 
-    pub async fn run(self, client: &Client) -> Result<RowStream, tokio_postgres::Error> {
-        client
-            .query_raw(&self.to_string(), self.args.iter().map(Deref::deref))
-            .await
-    }
-
-    pub async fn execute(self, client: &Client) -> Result<u64, tokio_postgres::Error> {
-        client
-            .execute_raw(&self.to_string(), self.args.iter().map(Deref::deref))
-            .await
+    pub fn into_args(self) -> Vec<Box<dyn ToSql>> {
+        self.args
     }
 
     fn append_buffer(&mut self, query: &str) {
