@@ -23,4 +23,5 @@ futures-util = { version = "0.3", default-features = false }
 pgutils-macros = { path = "internal/macros" }
 pgutils-migrate = { path = "internal/migrate" }
 qp-postgres = { version = "0.1" }
+thiserror = "1.0"
 tokio-postgres = "0.7"

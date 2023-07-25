@@ -7,7 +7,7 @@ pub mod migrate {
     pub use pgutils_migrate::*;
 }
 
-pub use database::Database;
+pub use database::{Database, DatabaseError};
 
 #[macro_export]
 macro_rules! migrate {
